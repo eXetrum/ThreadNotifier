@@ -12,7 +12,7 @@ namespace ThreadNotifier.Modules
         [Command("help")]
         public async Task Help()
         {
-            string[] commands = { "help", "list", "watch", "unwatch", "status" };
+            string[] commands = { "help - показать это сообщение", "list - показать список подписок(форумов)", "watch <link> - добавить форум", "unwatch <link> - убрать форум" };
 
             StringBuilder sb = new StringBuilder();
             foreach (var item in commands) sb.Append(item + "\n");
@@ -90,73 +90,6 @@ namespace ThreadNotifier.Modules
             Program.subscribers[nickname].Add(forumUrl);
             Program.AddServer(nickname, forumUrl);
             await ReplyAsync(string.Format("{0} now is watching for {1}\n", Context.User.Username, forumUrl));
-        }
-
-        [Command("status")]
-        public async Task Status()
-        {
-            string nickname = Context.User.Username + "#" + Context.User.Discriminator;
-
-            string DISCORD_FORMAT_STR = "{0,-20}\n{1,-16}\n{2,-16}\n";
-            string CONSOLE_FORMAT_STR = "{0,-20}{1,-16}{2,-16}{3,-12}\n";
-
-            string title = "WowCircle Forum Status";
-            var fields = new List<EmbedFieldBuilder>();
-            
-            if(!Program.subscribers.ContainsKey(nickname))
-            {
-                await ReplyAsync(string.Format("No data available for user {0}\n", Context.User.Username));
-                return;
-            }
-
-            StringBuilder sb = new StringBuilder();
-            foreach (var forumUrl in Program.subscribers[nickname])
-            {
-                var wowCircleForum = Program.snapshot[forumUrl];
-                sb.Append(wowCircleForum.Url + Environment.NewLine);
-                foreach (var thread in wowCircleForum.threads)
-                {
-                    string discordText = string.Format("{0,-20}{1,-32}{2,-14}",//DISCORD_FORMAT_STR,
-                        thread.Author.NickName,
-                        thread.Url,
-                        thread.CreatedAt
-                    );
-                    
-                    fields.Add(new EmbedFieldBuilder() { IsInline = false, Name = thread.Title, Value = discordText });
-                }
-            }
-
-            /*
-            sb.Append(string.Format(CONSOLE_FORMAT_STR, "ServerName", "Online", "Uptime", "Status"));
-            foreach (var item in Program.cache)
-            {
-                string consoleText = string.Format(CONSOLE_FORMAT_STR,
-                    item.Value.Name,
-                    item.Value.Online,
-                    item.Value.Uptime,
-                    item.Value.Status.ToString());
-
-                string discordText = string.Format(DISCORD_FORMAT_STR,
-                    item.Value.Online,
-                    item.Value.Uptime,
-                    item.Value.Status.ToString());
-
-                sb.Append(consoleText);
-
-                fields.Add(new EmbedFieldBuilder() { IsInline = true, Name = item.Value.Name, Value = discordText });
-            }*/
-            //Program.dumpForum(Program.ROOT_FORUM);
-
-
-            var embed = new EmbedBuilder()
-            {
-                Title = title,
-                Fields = fields
-            };
-
-
-            //Console.WriteLine(sb.ToString());
-            await ReplyAsync("", false, embed.Build());
         }
 
     }

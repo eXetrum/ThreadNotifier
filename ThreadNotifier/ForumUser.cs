@@ -8,6 +8,7 @@ namespace ThreadNotifier
     {
         public string NickName { get; set; }
         public string ProfileUrl { get; set; }
+        public string AvatarUrl { get; set; }
 
     }
 }

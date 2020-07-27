@@ -11,5 +11,6 @@ namespace ThreadNotifier
         public string Url { get; set; }
         public string ID { get; set; }
         public DateTime CreatedAt { get; set; }
+        public bool IsNew { get; set; }
     }
 }
