@@ -29,10 +29,11 @@ namespace ThreadNotifier
         private static int DELAY = 60 * 1000; // 60 sec (milliseconds)
         private static int MAX_SECONDS_BETWEEN_UPDATE = 5 * 60; // 5 min (seconds)
 
+        private static string TOKEN = "YOUR_TOKEN_HERE";
+        private static ulong CHANNEL_ID = 730891176114389150;
+        private static bool IS_PM_NOTIFY = false;
 
-        private static string TOKEN = "NzM1ODE1MDYwMDUxNDYwMTU1.XxlvQQ.ilGSoF8cm-HJ73PZNQztL1NBrsU";//"YOUR_TOKEN_HERE";
         private static string ANNOUNCEMENT_MESSAGE = "АХТУНГ ! ШОТОПРОИЗОШЛО !";
-
         public static string ROOT_URL = @"https://forum.wowcircle.net";
         // Mimic mozilla 
         private static string USER_AGENT = @"User-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:78.0) Gecko/20100101 Firefox/78.0";
@@ -51,7 +52,6 @@ namespace ThreadNotifier
         // Pairs: Discord Nickname str -> List of strings of forums (urls)
         public static Dictionary<string, List<string>> subscribers = new Dictionary<string, List<string>>();
         // Pairs: Discord Nickname str -> ThreadID str (global cache)
-        //public static Dictionary<string, HashSet<string>> globalThreadCache = new Dictionary<string, HashSet<string>>();
         public static HashSet<string> globalThreadCache = new HashSet<string>();
 
         static Configuration cfg = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
@@ -253,7 +253,6 @@ namespace ThreadNotifier
 
         private static void updateCache()
         {
-            //Dictionary<string, WowCircleForum> oldsnapshot = new Dictionary<string, WowCircleForum>(snapshot);
 
             Console.WriteLine("=================[Update cache: {0}]=================", DateTime.Now);
 
@@ -296,6 +295,8 @@ namespace ThreadNotifier
 
         private void notifySubscribers()
         {
+            var channelSocket = _client.GetChannel(CHANNEL_ID) as IMessageChannel;
+
             foreach (var userName in subscribers.Keys)
             {
                 string[] chunks = userName.Split('#');
@@ -308,9 +309,6 @@ namespace ThreadNotifier
                     {
                         if (snapshot[forumUrl].threads[i].IsNew)
                         {
-
-                            SocketUser userSocket = _client.GetUser(username, discriminator);
-
                             ///////////// Construct message
                             var thread = snapshot[forumUrl].threads[i];
 
@@ -345,7 +343,12 @@ namespace ThreadNotifier
                                 Fields = fields
                             };
 
-                            userSocket.SendMessageAsync(ANNOUNCEMENT_MESSAGE, false, embed.Build());
+                            if (IS_PM_NOTIFY)
+                            {
+                                SocketUser userSocket = _client.GetUser(username, discriminator);
+                                userSocket.SendMessageAsync(ANNOUNCEMENT_MESSAGE, false, embed.Build());
+                            }
+                            channelSocket.SendMessageAsync("", false, embed.Build());
                         }
                     }
                 }

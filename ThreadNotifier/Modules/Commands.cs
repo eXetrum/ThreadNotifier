@@ -12,7 +12,7 @@ namespace ThreadNotifier.Modules
         [Command("help")]
         public async Task Help()
         {
-            string[] commands = { "help - показать это сообщение", "list - показать список подписок(форумов)", "watch <link> - добавить форум", "unwatch <link> - убрать форум" };
+            string[] commands = { "help - показать это сообщение", "list - показать список подписок(форумов)", "watch_forum <link> - добавить форум", "unwatch_forum <link> - убрать форум" };
 
             StringBuilder sb = new StringBuilder();
             foreach (var item in commands) sb.Append(item + "\n");
@@ -44,7 +44,7 @@ namespace ThreadNotifier.Modules
             await ReplyAsync(sb.ToString());
         }
 
-        [Command("unwatch")]
+        [Command("unwatch_forum")]
         public async Task UnWatch(string forumUrl)
         {
             string nickname = Context.User.Username + "#" + Context.User.Discriminator;
@@ -74,7 +74,7 @@ namespace ThreadNotifier.Modules
             await ReplyAsync(string.Format("{0} is not watching yet for {1}\n", Context.User.Username, forumUrl));
         }
 
-        [Command("watch")]
+        [Command("watch_forum")]
         public async Task Watch(string forumUrl)
         {
             string nickname = Context.User.Username + "#" + Context.User.Discriminator;
