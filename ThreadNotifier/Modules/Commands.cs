@@ -12,10 +12,15 @@ namespace ThreadNotifier.Modules
         [Command("help")]
         public async Task Help()
         {
-            string[] commands = { "help - показать это сообщение", "list - показать список подписок(форумов)", "watch_forum <link> - добавить форум", "unwatch_forum <link> - убрать форум" };
+            string[] commands = { 
+                "help - показать это сообщение", 
+                "list - показать список подписок(форумов)", 
+                "watch_forum <link> - добавить форум в список слежения", 
+                "unwatch_forum <link> - убрать форум из списка слежения" 
+            };
 
             StringBuilder sb = new StringBuilder();
-            foreach (var item in commands) sb.Append(item + "\n");
+            foreach (var item in commands) sb.Append(item + Environment.NewLine);
 
             await ReplyAsync(sb.ToString());
         }
@@ -23,73 +28,58 @@ namespace ThreadNotifier.Modules
         [Command("list")]
         public async Task ListServers()
         {
-            string nickname = Context.User.Username + "#" + Context.User.Discriminator;
+            string nickname = string.Format("{0}#{1}", Context.User.Username, Context.User.Discriminator);
 
-            // Ensure nickname exists
-            if (!Program.subscribers.ContainsKey(nickname)) Program.subscribers.Add(nickname, new List<string>());
+            var userList = Program.GetSubscriptions();
 
+            if (userList.Count == 0) 
+            {
+                await ReplyAsync("Список слежения пуст");
+                return;
+            }
 
             StringBuilder sb = new StringBuilder();
-            if (Program.subscribers[nickname].Count == 0)
-            {
-                sb.Append("Your watching list is empty.\n");
-            }
-            else
-            {
-                foreach (var serverName in Program.subscribers[nickname])
-                {
-                    sb.Append(string.Format("{0}\n", serverName));
-                }
-            }
+            foreach (var forumUrl in userList)
+                sb.Append(string.Format("{0}{1}", forumUrl, Environment.NewLine));
+
             await ReplyAsync(sb.ToString());
         }
 
-        [Command("unwatch_forum")]
+        [Command("unwatch_forum"), RequireOwner()]
         public async Task UnWatch(string forumUrl)
         {
-            string nickname = Context.User.Username + "#" + Context.User.Discriminator;
-
-            // Ensure nickname exists
-            if (!Program.subscribers.ContainsKey(nickname)) Program.subscribers.Add(nickname, new List<string>());
+            string nickname = string.Format("{0}#{1}", Context.User.Username, Context.User.Discriminator);
 
             if (forumUrl.Equals("*"))
             {
-                foreach(var forum in Program.subscribers[nickname])
-                {
-                    Program.RemoveServer(nickname, forum);
-                }
-                Program.subscribers[nickname].Clear();
-                await ReplyAsync(string.Format("{0} now is no more watching any forum\n", Context.User.Username));
+                Program.RemoveAll();
+                await ReplyAsync(string.Format("{0} более не следит ни за одни форумом{1}", Context.User.Username, Environment.NewLine));
                 return;
             }
 
-
-            if (Program.subscribers[nickname].Contains(forumUrl))
+            if(!Program.IsSubscriptionExists(forumUrl))
             {
-                Program.subscribers[nickname].Remove(forumUrl);
-                Program.RemoveServer(nickname, forumUrl);
-                await ReplyAsync(string.Format("{0} is no more watching for {1}\n", Context.User.Username, forumUrl));
+                await ReplyAsync(string.Format("{0} еще не следит за {1}{2}", Context.User.Username, forumUrl, Environment.NewLine));
                 return;
             }
-            await ReplyAsync(string.Format("{0} is not watching yet for {1}\n", Context.User.Username, forumUrl));
+
+            Program.RemoveServer(forumUrl);            
+            await ReplyAsync(string.Format("{0} более не следит за {1}{2}", Context.User.Username, forumUrl, Environment.NewLine));            
         }
 
-        [Command("watch_forum")]
+        [Command("watch_forum"), RequireOwner()]
         public async Task Watch(string forumUrl)
         {
-            string nickname = Context.User.Username + "#" + Context.User.Discriminator;
+            string nickname = string.Format("{0}#{1}", Context.User.Username, Context.User.Discriminator);
 
-            // Ensure nickname exists
-            if (!Program.subscribers.ContainsKey(nickname)) Program.subscribers.Add(nickname, new List<string>());
-
-            if (Program.subscribers[nickname].Contains(forumUrl))
+            if (Program.IsSubscriptionExists(forumUrl))
             {
-                await ReplyAsync(string.Format("{0} already assigned to {1}\n", forumUrl, Context.User.Username));
+                await ReplyAsync(string.Format("{0} уже следит за {1}{2}", Context.User.Username, forumUrl, Environment.NewLine));
                 return;
             }
-            Program.subscribers[nickname].Add(forumUrl);
-            Program.AddServer(nickname, forumUrl);
-            await ReplyAsync(string.Format("{0} now is watching for {1}\n", Context.User.Username, forumUrl));
+
+            Program.AddServer(forumUrl);
+            await ReplyAsync(string.Format("{0} теперь следит за {1}{2}", Context.User.Username, forumUrl, Environment.NewLine));
         }
 
     }
