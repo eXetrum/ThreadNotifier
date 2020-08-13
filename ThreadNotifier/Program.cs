@@ -17,6 +17,7 @@ using Discord.WebSocket;
 using HtmlAgilityPack;
 using System.Configuration;
 using System.IO;
+using System.Collections.Concurrent;
 
 namespace ThreadNotifier
 {
@@ -26,9 +27,10 @@ namespace ThreadNotifier
         static void Main(string[] args) => new Program().RunBotAsync().GetAwaiter().GetResult();
 
         // Const things
-        private static int DELAY = 60 * 1000;                       // 60 sec (milliseconds)
-        private static int MAX_SECONDS_BETWEEN_UPDATE = 60 * 60;    // 60 min (seconds)
-        private static ulong CHANNEL_ID = 730891176114389150;       // textchannel id
+        private static int DELAY = 60 * 1000;                           // 60 sec (milliseconds)
+        private static int NEW_THREAD_MAX_TIMEOUT = 60 * 60;            // 60 min (seconds)
+        private static int MAX_SECONDS_BETWEEN_REQUEST = 5 * 1000;      // 5 sec (miliseconds)
+        private static ulong CHANNEL_ID = 730891176114389150;           // textchannel id
 
         private static string BOT_PREFIX = "!!";
         private static string TOKEN = "YOUR_TOKEN_HERE";
@@ -41,27 +43,28 @@ namespace ThreadNotifier
         private static string CFG_SEPARATOR = "\r\n";
 
 
-        private static DiscordSocketClient _client;
+        private DiscordSocketClient _client;
         private CommandService _commands;
         private IServiceProvider _services;
 
         // Private data
         // Pairs: ForumUrl str -> WowCircleForum object
-        private static Dictionary<string, WowCircleForum> snapshot = new Dictionary<string, WowCircleForum>();
-        // Pairs: List of subscribtions (forum urls)
-        private static List<string> subscribtions = new List<string>();
-        // ThreadID str (global cache)
-        private static HashSet<string> globalThreadCache = new HashSet<string>();
-        private static Dictionary<string, int> notifyCounters = new Dictionary<string, int>();
+        private static ConcurrentDictionary<string, WowCircleForum> snapshot = new ConcurrentDictionary<string, WowCircleForum>();
+        // List of subscribtions (forum urls)
+        private static ConcurrentBag<string> subs = new ConcurrentBag<string>();
+        // Cache of visited threads
+        private static ConcurrentBag<string> visitedThreads = new ConcurrentBag<string>();
 
-        static Configuration cfg = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
+        private static Configuration cfg = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
+
+        private static bool isWorkerThreadStart = false;
 
         private static object locker = new object();
 
         public async Task RunBotAsync()
         {
-            // Read resources prev settings
-            LoadResources();
+            // Read resources (list of forums)
+            await LoadResourcesAsync();
 
             _client = new DiscordSocketClient();
             _commands = new CommandService();
@@ -120,14 +123,16 @@ namespace ThreadNotifier
         #endregion
 
         #region Load/Add/Remove forum methods
-        private static void LoadResources()
+        private static async Task LoadResourcesAsync()
         {
-            cfg.AppSettings.Settings.Remove("[Username]:Riko#4224");
-            cfg.AppSettings.Settings.Remove("[Username]:Vusale#6223");
+            //cfg.AppSettings.Settings.Clear();
             Console.WriteLine("Loading resources...");
-            
-            if (cfg.AppSettings.Settings[CFG_PREFIX] == null)
+
+            if (cfg.AppSettings.Settings[CFG_PREFIX] == null) {
                 cfg.AppSettings.Settings.Add(CFG_PREFIX, "");
+                Console.WriteLine("Loading resources complete");
+                return;
+            }
 
             foreach (var key in cfg.AppSettings.Settings.AllKeys)
             {
@@ -139,24 +144,26 @@ namespace ThreadNotifier
 
                     Console.WriteLine("Caching data...");
                     List<string> forums = new List<string>(value.Split(CFG_SEPARATOR, StringSplitOptions.RemoveEmptyEntries).ToArray());
+
                     foreach (var forumUrl in forums)
                     {
                         var path = resolveFullPath(forumUrl);
                         Console.WriteLine("\t{0}", path);
-                        if (!subscribtions.Contains(path))
+                        if (!subs.Contains(path))
                         {
-                            subscribtions.Add(path);
-                            
-                            if(!snapshot.ContainsKey(path))
-                                snapshot.Add(path, fetchForum(path));
+                            subs.Add(path);
+
+                            var forumObj = await fetchForum(path);
+
+                            snapshot.GetOrAdd(path, forumObj);
 
                             for(int i = 0; i < snapshot[path].threads.Count; ++i)
                             {
                                 ForumThread thread = snapshot[path].threads[i];
                                 
-                                if(!globalThreadCache.Contains(thread.ID))
+                                if(!visitedThreads.Contains(thread.ID))
                                 {
-                                    globalThreadCache.Add(thread.ID);
+                                    visitedThreads.Add(thread.ID);
                                 }
                                 snapshot[path].threads[i].IsNew = false;
                             }
@@ -168,87 +175,100 @@ namespace ThreadNotifier
             Console.WriteLine("Loading resources complete");
         }
 
-        private static void RefreshCfg(List<string> servers)
+        private static async Task<bool> RefreshCfgAsync(List<string> servers)
         {
-            // Refresh cfg 
-            cfg.AppSettings.Settings[CFG_PREFIX].Value = String.Join(CFG_SEPARATOR, servers.ToArray());
-            // Save changes
-            cfg.Save(ConfigurationSaveMode.Modified);
-            ConfigurationManager.RefreshSection("appSettings");
+            return await Task.Run(() =>
+            {
+                // Refresh cfg 
+                cfg.AppSettings.Settings[CFG_PREFIX].Value = String.Join(CFG_SEPARATOR, servers.ToArray());
+                // Save changes
+                cfg.Save(ConfigurationSaveMode.Modified);
+                ConfigurationManager.RefreshSection("appSettings");
+                return true;
+            });
         }
 
-        public static void AddServer(string forumUrl)
+        public static async Task<bool> AddServer(string forumUrl)
         {
-            lock (locker)
-            {
-                forumUrl = resolveFullPath(forumUrl);
+            forumUrl = resolveFullPath(forumUrl);
 
-                if (subscribtions.Contains(forumUrl)) return;
+            if (subs.Contains(forumUrl)) return false;
+
+            string value = cfg.AppSettings.Settings[CFG_PREFIX].Value;
+            List<string> forums = new List<string>(value.Split(CFG_SEPARATOR, StringSplitOptions.RemoveEmptyEntries));
+
+
+            // Add to local list
+            if (!forums.Contains(forumUrl))
+                forums.Add(forumUrl);
+
+            // Add to subs list
+            subs.Add(forumUrl);
+
+            await RefreshCfgAsync(forums);
+            
+            return true;
+        }
+        public static async Task<bool> RemoveServerAsync(string forumUrl)
+        {
+            forumUrl = resolveFullPath(forumUrl);
+                
+            if (!subs.Contains(forumUrl)) return false;
+                
+            string value = cfg.AppSettings.Settings[CFG_PREFIX].Value;
+            List<string> forums = new List<string>(value.Split(CFG_SEPARATOR, StringSplitOptions.RemoveEmptyEntries));
+                
+            // Remove from local list
+            if (forums.Contains(forumUrl))
+                forums.Remove(forumUrl);
+                
+            // Remove from subs list
+            subs = new ConcurrentBag<string>(subs.Except(new string[] { forumUrl }));
+                
+            WowCircleForum forumObj = null;
+            if (snapshot.ContainsKey(forumUrl))
+                snapshot.Remove(forumUrl, out forumObj);
+
+            await RefreshCfgAsync(forums);
+
+            return true;
+        }
+
+        public static async Task<bool> RemoveAllAsync()
+        {
+            return await Task.Run( () =>
+            {
+                var urls = subs.ToArray();
+
+                for (int i = 0; i < urls.Length; ++i)
+                {
+                    urls[i] = resolveFullPath(urls[i]);
+                }
 
                 string value = cfg.AppSettings.Settings[CFG_PREFIX].Value;
                 List<string> forums = new List<string>(value.Split(CFG_SEPARATOR, StringSplitOptions.RemoveEmptyEntries));
-
-
-                // Add to local list
-                if (!forums.Contains(forumUrl))
-                    forums.Add(forumUrl);
-
-                // Add to subs list
-                subscribtions.Add(forumUrl);
-
-                RefreshCfg(forums);
-            }
-        }
-        public static void RemoveServer(string forumUrl)
-        {
-            lock (locker)
-            {
-                forumUrl = resolveFullPath(forumUrl);
-
-                if (!subscribtions.Contains(forumUrl)) return;
-
-                string value = cfg.AppSettings.Settings[CFG_PREFIX].Value;
-                List<string> forums = new List<string>(value.Split(CFG_SEPARATOR, StringSplitOptions.RemoveEmptyEntries));
-
-                // Remove from local list
-                if (forums.Contains(forumUrl))
-                    forums.Remove(forumUrl);
 
                 // Remove from subs list
-                subscribtions.Remove(forumUrl);
+                subs = new ConcurrentBag<string>(subs.Except(urls));
 
-                if (snapshot.ContainsKey(forumUrl))
-                    snapshot.Remove(forumUrl);
+                WowCircleForum forumObj = null;
+                foreach (var forumUrl in urls)
+                {
+                    if (snapshot.ContainsKey(forumUrl))
+                        snapshot.Remove(forumUrl, out forumObj);
+                }
 
-                RefreshCfg(forums);
-            }
+                return RefreshCfgAsync(forums);
+            });
+        }
+        public static async Task<bool> IsSubscriptionExistsAsync(string forumUrl)
+        {
+            return await Task.Run(() => subs.Contains(forumUrl));
         }
 
-        public static void RemoveAll()
+        public static async Task<ConcurrentBag<string>> GetSubscriptionsAsync()
         {
-            foreach(var forumUrl in subscribtions.ToArray())
-            {
-                RemoveServer(forumUrl);
-            }
-        }
-        public static bool IsSubscriptionExists(string forumUrl)
-        {
-            bool result = false;
-            lock (locker)
-            {
-                result = subscribtions.Contains(forumUrl);
-            }
-            return result;
-        }
-
-        public static List<string> GetSubscriptions()
-        {
-            List<string> subs = new List<string>();
-            lock(locker)
-            {
-                subs = new List<string>(subscribtions);
-            }
-            return subs;
+            return await Task.Run(() => subs);
         }
 
         #endregion
@@ -256,164 +276,170 @@ namespace ThreadNotifier
         #region WorkLoop methods
         private Task OnClientReady()
         {
+            if (isWorkerThreadStart)
+                return Task.CompletedTask;
+
+
+            isWorkerThreadStart = true;
+
             Thread th = new Thread(WorkLoop);
             th.IsBackground = true;
             th.Start();
             return Task.CompletedTask;
         }
-        private void WorkLoop()
+        private async void WorkLoop()
         {
 
             while (true)
             {
                 try
                 {
-                    updateCache();
-                    sendNotifications();
+                    await updateCache();
+                    await sendNotifications(_client);
+
+                    int sleepTimeout = new Random().Next(DELAY, 2 * DELAY);
+                    Console.Write("Pause for {0} ms....", sleepTimeout);
+                    Thread.Sleep(sleepTimeout);
+                    Console.WriteLine("Done.");
                 }
                 catch (Exception ex)
                 {
                     Console.Error.WriteLine("Error: {0}|||{1}", ex.Message, ex.StackTrace);
                 }
-
-                int sleepTimeout = new Random().Next(DELAY, 2 * DELAY);
-                Thread.Sleep(sleepTimeout);
             }
         }
 
-        private static void updateCache()
-        {
-            lock (locker) 
-            {
-                try
-                {
-                    if(subscribtions.Count == 0)
-                    {
-                        Console.WriteLine("=================[Update cache declined(subs list is empty): {0}]=================", DateTime.Now);
-                        return;
-                    }
-                    Console.WriteLine("=================[Update cache starts at: {0}]=================", DateTime.Now);
-
-                    // Update snapshot data
-                    foreach (var forumUrl in subscribtions)
-                    {
-                        Console.WriteLine("Fetching data for {0}...", forumUrl);
-                        if (!snapshot.ContainsKey(forumUrl))
-                            snapshot.Add(forumUrl, null);
-                        snapshot[forumUrl] = fetchForum(forumUrl);
-
-                        // Update thread status
-                        for (int i = 0; i < snapshot[forumUrl].threads.Count; ++i)
-                        {
-                            var thread = snapshot[forumUrl].threads[i];
-                            double elapsed = DateTime.Now.Subtract(thread.CreatedAt).TotalSeconds;
-
-                            if (elapsed < MAX_SECONDS_BETWEEN_UPDATE
-                                && !globalThreadCache.Contains(thread.ID))
-                            {
-                                globalThreadCache.Add(thread.ID);
-                                snapshot[forumUrl].threads[i].IsNew = true;
-                                Console.WriteLine("New thread found: {0}\n\n", thread.ID);
-                            }
-                        }
-                    }
-                    // Sort
-                    foreach (var forumUrl in snapshot.Keys.ToArray())
-                    {
-                        snapshot[forumUrl].threads.Sort((a, b) => a.CreatedAt.CompareTo(b.CreatedAt));
-                        Console.WriteLine("Forum: {0}", snapshot[forumUrl].Title);
-                        for (int i = 0; i < snapshot[forumUrl].threads.Count; ++i)
-                        {
-                            double elapsed = DateTime.Now.Subtract(snapshot[forumUrl].threads[i].CreatedAt).TotalSeconds;
-
-                            Console.WriteLine("{0,-25} {1,-25} {2, -20}",
-                                snapshot[forumUrl].threads[i].ID,
-                                snapshot[forumUrl].threads[i].CreatedAt,
-                                elapsed);
-                        }
-                        Console.WriteLine();
-                    }
-                    Console.WriteLine("=================[Cache timestamp: {0}]=================", DateTime.Now);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("updateCache failure: {0}{1}{2}", ex.Message, ex.StackTrace, Environment.NewLine);
-                }
-            }
-        }
-
-        private void sendNotifications()
+        private static async Task updateCache()
         {
             try
             {
-                lock (locker)
+                if (subs.Count == 0)
                 {
-                    var channelSocket = _client.GetChannel(CHANNEL_ID) as IMessageChannel;
-                    var newThreads = new List<string>();
-                    foreach (var forumUrl in subscribtions)
-                    {
-                        for (int i = 0; i < snapshot[forumUrl].threads.Count; ++i)
-                        {
-                            if (snapshot[forumUrl].threads[i].IsNew)
-                            {
-                                ///////////// Construct message
-                                var thread = snapshot[forumUrl].threads[i];
-                                newThreads.Add(thread.ID);
-
-                                var fields = new List<EmbedFieldBuilder>();
-
-                                fields.Add(new EmbedFieldBuilder()
-                                {
-                                    IsInline = false,
-                                    Name = "createdAt",
-                                    Value = thread.CreatedAt
-                                });
-
-                                fields.Add(new EmbedFieldBuilder()
-                                {
-                                    IsInline = false,
-                                    Name = "ID",
-                                    Value = thread.ID
-                                });
-
-                                var embed = new EmbedBuilder()
-                                {
-                                    Title = thread.Title,
-                                    Url = thread.Url,
-                                    Author = new EmbedAuthorBuilder()
-                                    {
-                                        Name = thread.Author.NickName,
-                                        Url = thread.Author.ProfileUrl,
-                                        IconUrl = thread.Author.AvatarUrl
-                                    },
-                                    ThumbnailUrl = thread.Url,
-                                    Fields = fields,
-                                    Description = thread.Description
-                                };
-
-
-                                channelSocket.SendMessageAsync("", false, embed.Build());
-                            }
-                        }
-                    }
-
-
-                    // RESET threads flag
-                    foreach (var forumUrl in snapshot.Keys.ToArray())
-                    {
-                        for (int i = 0; i < snapshot[forumUrl].threads.Count; ++i)
-                        {
-                            snapshot[forumUrl].threads[i].IsNew = false;
-                        }
-                    }
-
+                    Console.WriteLine("=================[Update cache declined(subs list is empty): {0}]=================", DateTime.Now);
+                    return;
                 }
-            } 
-            catch(Exception ex)
+                Console.WriteLine("=================[Update cache starts at: {0}]=================", DateTime.Now);
+
+                // Update snapshot data
+                foreach (var forumUrl in subs)
+                {
+                    Console.WriteLine("Fetching data for {0}...", forumUrl);
+                    WowCircleForum forumObj = null;
+                    if (!snapshot.ContainsKey(forumUrl))
+                        snapshot.GetOrAdd(forumUrl, forumObj);
+                    snapshot[forumUrl] = await fetchForum(forumUrl);
+
+                    // Update thread status
+                    for (int i = 0; i < snapshot[forumUrl].threads.Count; ++i)
+                    {
+                        var thread = snapshot[forumUrl].threads[i];
+                        double elapsed = DateTime.Now.Subtract(thread.CreatedAt).TotalSeconds;
+
+                        if (elapsed < NEW_THREAD_MAX_TIMEOUT
+                            && !visitedThreads.Contains(thread.ID))
+                        {
+                            visitedThreads.Add(thread.ID);
+                            snapshot[forumUrl].threads[i].IsNew = true;
+                            Console.WriteLine("New thread found: {0}\n\n", thread.ID);
+                        }
+                    }
+
+                    int sleepTimeout = new Random().Next(MAX_SECONDS_BETWEEN_REQUEST + 1);
+                    Console.WriteLine("Delay {0} ms", sleepTimeout);
+                    Thread.Sleep(sleepTimeout);
+                }
+                // Sort
+                foreach (var forumUrl in snapshot.Keys.ToArray())
+                {
+                    snapshot[forumUrl].threads.Sort((a, b) => a.CreatedAt.CompareTo(b.CreatedAt));
+                    Console.WriteLine("Forum: {0}", snapshot[forumUrl].Title);
+                    for (int i = 0; i < snapshot[forumUrl].threads.Count; ++i)
+                    {
+                        double elapsed = DateTime.Now.Subtract(snapshot[forumUrl].threads[i].CreatedAt).TotalSeconds;
+
+                        Console.WriteLine("{0,-25} {1,-25} {2, -20}",
+                            snapshot[forumUrl].threads[i].ID,
+                            snapshot[forumUrl].threads[i].CreatedAt,
+                            elapsed);
+                    }
+                    Console.WriteLine();
+                }
+                Console.WriteLine("=================[Cache timestamp: {0}]=================", DateTime.Now);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("updateCache failure: {0}{1}{2}", ex.Message, ex.StackTrace, Environment.NewLine);
+            }
+        }
+
+        private static async Task sendNotifications(DiscordSocketClient client)
+        {
+            try
+            {
+                var channelSocket = client.GetChannel(CHANNEL_ID) as IMessageChannel;
+                var newThreads = new List<string>();
+                foreach (var forumUrl in subs)
+                {
+                    for (int i = 0; i < snapshot[forumUrl].threads.Count; ++i)
+                    {
+                        if (snapshot[forumUrl].threads[i].IsNew)
+                        {
+                            Console.WriteLine("Sending notification, threadID={0}", snapshot[forumUrl].threads[i].ID);
+                            ///////////// Construct message
+                            var thread = snapshot[forumUrl].threads[i];
+                            newThreads.Add(thread.ID);
+
+                            var fields = new List<EmbedFieldBuilder>();
+
+                            fields.Add(new EmbedFieldBuilder()
+                            {
+                                IsInline = false,
+                                Name = "createdAt",
+                                Value = thread.CreatedAt
+                            });
+
+                            fields.Add(new EmbedFieldBuilder()
+                            {
+                                IsInline = false,
+                                Name = "ID",
+                                Value = thread.ID
+                            });
+
+                            var embed = new EmbedBuilder()
+                            {
+                                Title = thread.Title,
+                                Url = thread.Url,
+                                Author = new EmbedAuthorBuilder()
+                                {
+                                    Name = thread.Author.NickName,
+                                    Url = thread.Author.ProfileUrl,
+                                    IconUrl = thread.Author.AvatarUrl
+                                },
+                                ThumbnailUrl = thread.Url,
+                                Fields = fields,
+                                Description = thread.Description
+                            };
+
+
+                            await channelSocket.SendMessageAsync("", true, embed.Build());
+                        }
+                    }
+                }
+
+
+                // RESET threads flag
+                foreach (var forumUrl in snapshot.Keys.ToArray())
+                {
+                    for (int i = 0; i < snapshot[forumUrl].threads.Count; ++i)
+                    {
+                        snapshot[forumUrl].threads[i].IsNew = false;
+                    }
+                }
+            }
+            catch (Exception ex)
             {
                 Console.WriteLine("sendNotifications failed: {0}|||{1}{2}", ex.Message, ex.StackTrace, Environment.NewLine);
             }
-
         }
         #endregion
 
@@ -438,7 +464,7 @@ namespace ThreadNotifier
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine("Error: {0}", ex.Message);
+                Console.Error.WriteLine("fetchForumTitle failure: {0}", ex.Message);
             }
 
             return forumTitle;
@@ -451,18 +477,21 @@ namespace ThreadNotifier
             return resolveFullPath(@"/image.php" + uri.Query);
         }
 
-        private static WowCircleForum fetchForum(string forumUrl)
+        private static Task<WowCircleForum> fetchForum(string forumUrl)
         {
-            forumUrl = resolveFullPath(forumUrl);
-
-            WowCircleForum forum = new WowCircleForum()
+            return Task.Run(() =>
             {
-                Title = fetchForumTitle(forumUrl),
-                Url = forumUrl,
-                threads = fetchThreads(forumUrl)
-            };
-
-            return forum;
+                forumUrl = resolveFullPath(forumUrl);
+                
+                WowCircleForum forum = new WowCircleForum()
+                {
+                    Title = fetchForumTitle(forumUrl),
+                    Url = forumUrl,
+                    threads = fetchThreads(forumUrl)
+                };
+                
+                return forum;
+            });
         }
 
         private static List<ForumThread> fetchThreads(string forumUrl)
@@ -517,7 +546,7 @@ namespace ThreadNotifier
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine("Error: {0}", ex.Message);
+                Console.Error.WriteLine("fetchThreads failure: {0}", ex.Message);
             }
 
             return threads;

@@ -30,7 +30,7 @@ namespace ThreadNotifier.Modules
         {
             string nickname = string.Format("{0}#{1}", Context.User.Username, Context.User.Discriminator);
 
-            var userList = Program.GetSubscriptions();
+            var userList = await Program.GetSubscriptionsAsync();
 
             if (userList.Count == 0) 
             {
@@ -52,18 +52,19 @@ namespace ThreadNotifier.Modules
 
             if (forumUrl.Equals("*"))
             {
-                Program.RemoveAll();
+                await Program.RemoveAllAsync();
                 await ReplyAsync(string.Format("{0} более не следит ни за одни форумом{1}", Context.User.Username, Environment.NewLine));
                 return;
             }
 
-            if(!Program.IsSubscriptionExists(forumUrl))
+            var exists = await Program.IsSubscriptionExistsAsync(forumUrl);
+            if (!exists)
             {
                 await ReplyAsync(string.Format("{0} еще не следит за {1}{2}", Context.User.Username, forumUrl, Environment.NewLine));
                 return;
             }
 
-            Program.RemoveServer(forumUrl);            
+            await Program.RemoveServerAsync(forumUrl);            
             await ReplyAsync(string.Format("{0} более не следит за {1}{2}", Context.User.Username, forumUrl, Environment.NewLine));            
         }
 
@@ -72,13 +73,14 @@ namespace ThreadNotifier.Modules
         {
             string nickname = string.Format("{0}#{1}", Context.User.Username, Context.User.Discriminator);
 
-            if (Program.IsSubscriptionExists(forumUrl))
+            var exists = await Program.IsSubscriptionExistsAsync(forumUrl);
+            if (exists)
             {
                 await ReplyAsync(string.Format("{0} уже следит за {1}{2}", Context.User.Username, forumUrl, Environment.NewLine));
                 return;
             }
 
-            Program.AddServer(forumUrl);
+            await Program.AddServer(forumUrl);
             await ReplyAsync(string.Format("{0} теперь следит за {1}{2}", Context.User.Username, forumUrl, Environment.NewLine));
         }
 
