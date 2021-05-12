@@ -4402,11 +4402,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\hAPpY\\source\\repos\\ThreadNotifier\\ThreadNotifier\\ThreadNotifier.csproj",
+      "projectUniqueName": "D:\\temp\\test\\ThreadNotifier\\ThreadNotifier\\ThreadNotifier.csproj",
       "projectName": "ThreadNotifier",
-      "projectPath": "C:\\Users\\hAPpY\\source\\repos\\ThreadNotifier\\ThreadNotifier\\ThreadNotifier.csproj",
+      "projectPath": "D:\\temp\\test\\ThreadNotifier\\ThreadNotifier\\ThreadNotifier.csproj",
       "packagesPath": "C:\\Users\\hAPpY\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\hAPpY\\source\\repos\\ThreadNotifier\\ThreadNotifier\\obj\\",
+      "outputPath": "D:\\temp\\test\\ThreadNotifier\\ThreadNotifier\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\hAPpY\\AppData\\Roaming\\NuGet\\NuGet.Config",
@@ -4417,11 +4417,11 @@
       ],
       "sources": {
         "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
-        "https://api.nuget.org/v3/index.json": {},
-        "https://www.myget.org/F/discord-net/api/v3/index.json": {}
+        "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
         "netcoreapp3.1": {
+          "targetAlias": "netcoreapp3.1",
           "projectReferences": {}
         }
       },
@@ -4433,6 +4433,7 @@
     },
     "frameworks": {
       "netcoreapp3.1": {
+        "targetAlias": "netcoreapp3.1",
         "dependencies": {
           "Discord.Net": {
             "target": "Package",
@@ -4474,7 +4475,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\3.1.200\\RuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\5.0.202\\RuntimeIdentifierGraph.json"
       }
     }
   }

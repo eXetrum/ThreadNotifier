@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "hK9Rgtc9q3SYo/njH7vpmfPFNLg1VEvIWXMAfez0/tyCJ3We1rbD5qGnXsT5H57CeUJ4jV7QIjUnD436sounBw==",
+  "dgSpecHash": "m2wcaO80f2t8JWfBJhQIpRuXUwVLUQeub9ZXrKCb6dQlbBoJJ2/TsBuQNg9avbAvb5PNIYvoEgj1BB7V+nG3+g==",
   "success": true,
-  "projectFilePath": "C:\\Users\\hAPpY\\source\\repos\\ThreadNotifier\\ThreadNotifier\\ThreadNotifier.csproj",
+  "projectFilePath": "D:\\temp\\test\\ThreadNotifier\\ThreadNotifier\\ThreadNotifier.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\hAPpY\\.nuget\\packages\\discord.net\\2.2.0\\discord.net.2.2.0.nupkg.sha512",
     "C:\\Users\\hAPpY\\.nuget\\packages\\discord.net.commands\\2.2.0\\discord.net.commands.2.2.0.nupkg.sha512",

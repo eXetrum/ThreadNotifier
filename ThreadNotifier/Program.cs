@@ -27,17 +27,15 @@ namespace ThreadNotifier
         static void Main(string[] args) => new Program().RunBotAsync().GetAwaiter().GetResult();
 
         // Const things
-        private static int DELAY = 60 * 1000;                           // 60 sec (milliseconds)
-        private static int NEW_THREAD_MAX_TIMEOUT = 60 * 60;            // 60 min (seconds)
-        private static int MAX_SECONDS_BETWEEN_REQUEST = 5 * 1000;      // 5 sec (miliseconds)
+
+        public static string BASE_URL = @"https://forum.wowcircle.com";
+        private static string DISCORD_APP_TOKEN = "YOUR_TOKEN_HERE";
         private static ulong CHANNEL_ID = 730891176114389150;           // textchannel id
-
+        private static int FETCH_DELAY = 60;                            // 60 sec
+        private static int MAX_SECONDS_BETWEEN_REQUEST = 5;             // 5 sec
+        private static int NEW_TRHEAD_AGE = 3600;                       // 3600 sec == 60 min, all threads with creation time less than current value should be flagged as "new thread"
         private static string BOT_PREFIX = "!!";
-        private static string TOKEN = "YOUR_TOKEN_HERE";
-
-        public static string ROOT_URL = @"https://forum.wowcircle.net";
-        // Mimic mozilla 
-        private static string USER_AGENT = @"User-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:78.0) Gecko/20100101 Firefox/78.0";
+        private static string USER_AGENT = @"User-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:78.0) Gecko/20100101 Firefox/78.0"; // Mimic mozilla 
 
         private static string CFG_PREFIX = "[UserForumList]:";
         private static string CFG_SEPARATOR = "\r\n";
@@ -61,8 +59,23 @@ namespace ThreadNotifier
 
         private static object locker = new object();
 
+
+        public static void LoadSettings()
+        {
+            try { BASE_URL = ConfigurationManager.AppSettings["BASE_URL"]; } catch { }
+            try { DISCORD_APP_TOKEN = ConfigurationManager.AppSettings["DISCORD_APP_TOKEN"]; } catch { }
+            try { CHANNEL_ID = ulong.Parse(ConfigurationManager.AppSettings["CHANNEL_ID"]); } catch { }
+            try { FETCH_DELAY = int.Parse(ConfigurationManager.AppSettings["FETCH_DELAY"]); } catch { }
+            try { MAX_SECONDS_BETWEEN_REQUEST = int.Parse(ConfigurationManager.AppSettings["MAX_SECONDS_BETWEEN_REQUEST"]); } catch { }
+            try { NEW_TRHEAD_AGE = int.Parse(ConfigurationManager.AppSettings["NEW_TRHEAD_AGE"]); } catch { }
+            try { BOT_PREFIX = ConfigurationManager.AppSettings["BOT_PREFIX"]; } catch { }
+            try { USER_AGENT = ConfigurationManager.AppSettings["USER_AGENT"]; } catch { }
+        }
+
         public async Task RunBotAsync()
         {
+            LoadSettings();
+
             // Read resources (list of forums)
             await LoadResourcesAsync();
 
@@ -80,7 +93,7 @@ namespace ThreadNotifier
 
             await RegisterCommandsAsync();
 
-            await _client.LoginAsync(TokenType.Bot, TOKEN);
+            await _client.LoginAsync(TokenType.Bot, DISCORD_APP_TOKEN);
 
             await _client.StartAsync();
 
@@ -297,7 +310,7 @@ namespace ThreadNotifier
                     await updateCache();
                     await sendNotifications(_client);
 
-                    int sleepTimeout = new Random().Next(DELAY, 2 * DELAY);
+                    int sleepTimeout = new Random().Next(FETCH_DELAY, 2 * FETCH_DELAY) * 1000;
                     Console.Write("Pause for {0} ms....", sleepTimeout);
                     Thread.Sleep(sleepTimeout);
                     Console.WriteLine("Done.");
@@ -335,7 +348,7 @@ namespace ThreadNotifier
                         var thread = snapshot[forumUrl].threads[i];
                         double elapsed = DateTime.Now.Subtract(thread.CreatedAt).TotalSeconds;
 
-                        if (elapsed < NEW_THREAD_MAX_TIMEOUT
+                        if (elapsed < NEW_TRHEAD_AGE
                             && !visitedThreads.Contains(thread.ID))
                         {
                             visitedThreads.Add(thread.ID);
@@ -344,7 +357,7 @@ namespace ThreadNotifier
                         }
                     }
 
-                    int sleepTimeout = new Random().Next(MAX_SECONDS_BETWEEN_REQUEST + 1);
+                    int sleepTimeout = new Random().Next(MAX_SECONDS_BETWEEN_REQUEST) * 1000;
                     Console.WriteLine("Delay {0} ms", sleepTimeout);
                     Thread.Sleep(sleepTimeout);
                 }
@@ -554,9 +567,9 @@ namespace ThreadNotifier
 
         private static string resolveFullPath(string relativePath)
         {
-            if (!relativePath.StartsWith(ROOT_URL))
-                return ROOT_URL + "/" + relativePath;
-            return relativePath;
+            if (relativePath.StartsWith("http://") || relativePath.StartsWith("https://") || relativePath.StartsWith(BASE_URL)) return relativePath;
+
+            return BASE_URL + "/" + relativePath;
         }
 
         private static void parseTime(string[] timeChunks, out int hour, out int min)
